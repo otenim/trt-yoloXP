@@ -32,7 +32,7 @@ DEFINE_string(
     "table <network-type>-<precision>-calibration.table will be generated");
 
 DEFINE_string(
-    precision, "FP32",
+    precision, "fp32",
     "[OPTIONAL] Inference precision. Choose from kFLOAT, kHALF and kINT8.");
 
 DEFINE_string(calibration_images, "calibration_images.txt",
