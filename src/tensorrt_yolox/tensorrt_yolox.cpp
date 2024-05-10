@@ -12,43 +12,41 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "cuda_utils/cuda_check_error.hpp"
-#include "cuda_utils/cuda_unique_ptr.hpp"
-
-#include <tensorrt_yolox/calibrator.hpp>
-#include <tensorrt_yolox/preprocess.hpp>
-#include <tensorrt_yolox/tensorrt_yolox.hpp>
-
 #include <algorithm>
 #include <functional>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <string>
+#include <tensorrt_yolox/calibrator.hpp>
+#include <tensorrt_yolox/preprocess.hpp>
+#include <tensorrt_yolox/tensorrt_yolox.hpp>
 #include <vector>
 
-namespace
-{
-static void trimLeft(std::string & s)
-{
-  s.erase(s.begin(), find_if(s.begin(), s.end(), [](int ch) { return !isspace(ch); }));
+#include "cuda_utils/cuda_check_error.hpp"
+#include "cuda_utils/cuda_unique_ptr.hpp"
+
+namespace {
+static void trimLeft(std::string &s) {
+  s.erase(s.begin(),
+          find_if(s.begin(), s.end(), [](int ch) { return !isspace(ch); }));
 }
 
-static void trimRight(std::string & s)
-{
-  s.erase(find_if(s.rbegin(), s.rend(), [](int ch) { return !isspace(ch); }).base(), s.end());
+static void trimRight(std::string &s) {
+  s.erase(
+      find_if(s.rbegin(), s.rend(), [](int ch) { return !isspace(ch); }).base(),
+      s.end());
 }
 
-std::string trim(std::string & s)
-{
+std::string trim(std::string &s) {
   trimLeft(s);
   trimRight(s);
   return s;
 }
 
-bool fileExists(const std::string & file_name, bool verbose)
-{
-  if (!std::experimental::filesystem::exists(std::experimental::filesystem::path(file_name))) {
+bool fileExists(const std::string &file_name, bool verbose) {
+  if (!std::experimental::filesystem::exists(
+          std::experimental::filesystem::path(file_name))) {
     if (verbose) {
       std::cout << "File does not exist : " << file_name << std::endl;
     }
@@ -57,8 +55,7 @@ bool fileExists(const std::string & file_name, bool verbose)
   return true;
 }
 
-std::vector<std::string> loadListFromTextFile(const std::string & filename)
-{
+std::vector<std::string> loadListFromTextFile(const std::string &filename) {
   assert(fileExists(filename, true));
   std::vector<std::string> list;
 
@@ -80,10 +77,10 @@ std::vector<std::string> loadListFromTextFile(const std::string & filename)
   return list;
 }
 
-std::vector<std::string> loadImageList(const std::string & filename, const std::string & prefix)
-{
+std::vector<std::string> loadImageList(const std::string &filename,
+                                       const std::string &prefix) {
   std::vector<std::string> fileList = loadListFromTextFile(filename);
-  for (auto & file : fileList) {
+  for (auto &file : fileList) {
     if (fileExists(file, false)) {
       continue;
     } else {
@@ -91,23 +88,25 @@ std::vector<std::string> loadImageList(const std::string & filename, const std::
       if (fileExists(prefixed, false))
         file = prefixed;
       else
-        std::cerr << "WARNING: couldn't find: " << prefixed << " while loading: " << filename
-                  << std::endl;
+        std::cerr << "WARNING: couldn't find: " << prefixed
+                  << " while loading: " << filename << std::endl;
     }
   }
   return fileList;
 }
 }  // anonymous namespace
 
-namespace tensorrt_yolox
-{
-TrtYoloX::TrtYoloX(
-  const std::string & model_path, const std::string & precision, const int num_class,
-  const float score_threshold, const float nms_threshold, tensorrt_common::BuildConfig build_config,
-  const bool use_gpu_preprocess, std::string calibration_image_list_path, const double norm_factor,
-  [[maybe_unused]] const std::string & cache_dir, const tensorrt_common::BatchConfig & batch_config,
-  const size_t max_workspace_size)
-{
+namespace tensorrt_yolox {
+TrtYoloX::TrtYoloX(const std::string &model_path, const std::string &precision,
+                   const int num_class, const float score_threshold,
+                   const float nms_threshold,
+                   tensorrt_common::BuildConfig build_config,
+                   const bool use_gpu_preprocess,
+                   std::string calibration_image_list_path,
+                   const double norm_factor,
+                   [[maybe_unused]] const std::string &cache_dir,
+                   const tensorrt_common::BatchConfig &batch_config,
+                   const size_t max_workspace_size) {
   src_width_ = -1;
   src_height_ = -1;
   norm_factor_ = norm_factor;
@@ -117,8 +116,9 @@ TrtYoloX::TrtYoloX(
     if (build_config.clip_value <= 0.0) {
       if (calibration_image_list_path.empty()) {
         throw std::runtime_error(
-          "calibration_image_list_path should be passed to generate int8 engine "
-          "or specify values larger than zero to clip_value.");
+            "calibration_image_list_path should be passed to generate int8 "
+            "engine "
+            "or specify values larger than zero to clip_value.");
       }
     } else {
       // if clip value is larger than zero, calibration file is not needed
@@ -131,14 +131,15 @@ TrtYoloX::TrtYoloX(
     if (calibration_image_list_path != "") {
       calibration_images = loadImageList(calibration_image_list_path, "");
     }
-    tensorrt_yolox::ImageStream stream(max_batch_size, input_dims, calibration_images);
+    tensorrt_yolox::ImageStream stream(max_batch_size, input_dims,
+                                       calibration_images);
     fs::path calibration_table{model_path};
     std::string calibName = "";
     std::string ext = "";
     if (build_config.calib_type_str == "Entropy") {
       ext = "EntropyV2-";
-    } else if (
-      build_config.calib_type_str == "Legacy" || build_config.calib_type_str == "Percentile") {
+    } else if (build_config.calib_type_str == "Legacy" ||
+               build_config.calib_type_str == "Percentile") {
       ext = "Legacy-";
     } else {
       ext = "MinMax-";
@@ -152,25 +153,28 @@ TrtYoloX::TrtYoloX(
 
     std::unique_ptr<nvinfer1::IInt8Calibrator> calibrator;
     if (build_config.calib_type_str == "Entropy") {
-      calibrator.reset(
-        new tensorrt_yolox::Int8EntropyCalibrator(stream, calibration_table, norm_factor_));
+      calibrator.reset(new tensorrt_yolox::Int8EntropyCalibrator(
+          stream, calibration_table, norm_factor_));
 
-    } else if (
-      build_config.calib_type_str == "Legacy" || build_config.calib_type_str == "Percentile") {
+    } else if (build_config.calib_type_str == "Legacy" ||
+               build_config.calib_type_str == "Percentile") {
       const double quantile = 0.999999;
       const double cutoff = 0.999999;
       calibrator.reset(new tensorrt_yolox::Int8LegacyCalibrator(
-        stream, calibration_table, histogram_table, norm_factor_, true, quantile, cutoff));
+          stream, calibration_table, histogram_table, norm_factor_, true,
+          quantile, cutoff));
     } else {
-      calibrator.reset(
-        new tensorrt_yolox::Int8MinMaxCalibrator(stream, calibration_table, norm_factor_));
+      calibrator.reset(new tensorrt_yolox::Int8MinMaxCalibrator(
+          stream, calibration_table, norm_factor_));
     }
 
     trt_common_ = std::make_unique<tensorrt_common::TrtCommon>(
-      model_path, precision, std::move(calibrator), batch_config, max_workspace_size, build_config);
+        model_path, precision, std::move(calibrator), batch_config,
+        max_workspace_size, build_config);
   } else {
     trt_common_ = std::make_unique<tensorrt_common::TrtCommon>(
-      model_path, precision, nullptr, batch_config, max_workspace_size, build_config);
+        model_path, precision, nullptr, batch_config, max_workspace_size,
+        build_config);
   }
   trt_common_->setup();
 
@@ -179,31 +183,34 @@ TrtYoloX::TrtYoloX(
   }
 
   // Judge whether decoding output is required
-  // Plain models require decoding, while models with EfficientNMS_TRT module don't.
-  // If getNbBindings == 5, the model contains EfficientNMS_TRT
+  // Plain models require decoding, while models with EfficientNMS_TRT module
+  // don't. If getNbBindings == 5, the model contains EfficientNMS_TRT
   switch (trt_common_->getNbBindings()) {
     case 2:
       // Specified model is plain one.
       // Bindings are: [input, output]
       needs_output_decode_ = true;
-      // The following three values are considered only if the specified model is plain one
+      // The following three values are considered only if the specified model
+      // is plain one
       num_class_ = num_class;
       score_threshold_ = score_threshold;
       nms_threshold_ = nms_threshold;
       break;
     case 5:
       // Specified model contains Efficient NMS_TRT.
-      // Bindings are[input, detection_classes, detection_scores, detection_boxes, num_detections]
+      // Bindings are[input, detection_classes, detection_scores,
+      // detection_boxes, num_detections]
       needs_output_decode_ = false;
       break;
     default:
       needs_output_decode_ = true;
-      // The following three values are considered only if the specified model is plain one
+      // The following three values are considered only if the specified model
+      // is plain one
       num_class_ = num_class;
       score_threshold_ = score_threshold;
       nms_threshold_ = nms_threshold;
-      //Todo : Support multiple segmentation heads
-      multitask_++;      
+      // Todo : Support multiple segmentation heads
+      multitask_++;
       /*
       std::stringstream s;
       s << "\"" << model_path << "\" is unsupported format";
@@ -214,19 +221,23 @@ TrtYoloX::TrtYoloX(
   // GPU memory allocation
   const auto input_dims = trt_common_->getBindingDimensions(0);
   const auto input_size =
-    std::accumulate(input_dims.d + 1, input_dims.d + input_dims.nbDims, 1, std::multiplies<int>());
+      std::accumulate(input_dims.d + 1, input_dims.d + input_dims.nbDims, 1,
+                      std::multiplies<int>());
   if (needs_output_decode_) {
     const auto output_dims = trt_common_->getBindingDimensions(1);
     input_d_ = cuda_utils::make_unique<float[]>(batch_config[2] * input_size);
-    out_elem_num_ = std::accumulate(
-      output_dims.d + 1, output_dims.d + output_dims.nbDims, 1, std::multiplies<int>());
+    out_elem_num_ =
+        std::accumulate(output_dims.d + 1, output_dims.d + output_dims.nbDims,
+                        1, std::multiplies<int>());
     out_elem_num_ = out_elem_num_ * batch_config[2];
     out_elem_num_per_batch_ = static_cast<int>(out_elem_num_ / batch_config[2]);
     out_prob_d_ = cuda_utils::make_unique<float[]>(out_elem_num_);
-    out_prob_h_ = cuda_utils::make_unique_host<float[]>(out_elem_num_, cudaHostAllocPortable);
+    out_prob_h_ = cuda_utils::make_unique_host<float[]>(out_elem_num_,
+                                                        cudaHostAllocPortable);
     int w = input_dims.d[3];
     int h = input_dims.d[2];
-    int sum_tensors = (w / 8) * (h / 8) + (w / 16) * (h / 16) + (w / 32) * (h / 32);
+    int sum_tensors =
+        (w / 8) * (h / 8) + (w / 16) * (h / 16) + (w / 32) * (h / 32);
     if (sum_tensors == output_dims.d[1]) {
       // 3head (8,16,32)
       output_strides_ = {8, 16, 32};
@@ -240,24 +251,32 @@ TrtYoloX::TrtYoloX(
     max_detections_ = out_scores_dims.d[1];
     input_d_ = cuda_utils::make_unique<float[]>(batch_config[2] * input_size);
     out_num_detections_d_ = cuda_utils::make_unique<int32_t[]>(batch_config[2]);
-    out_boxes_d_ = cuda_utils::make_unique<float[]>(batch_config[2] * max_detections_ * 4);
-    out_scores_d_ = cuda_utils::make_unique<float[]>(batch_config[2] * max_detections_);
-    out_classes_d_ = cuda_utils::make_unique<int32_t[]>(batch_config[2] * max_detections_);
+    out_boxes_d_ =
+        cuda_utils::make_unique<float[]>(batch_config[2] * max_detections_ * 4);
+    out_scores_d_ =
+        cuda_utils::make_unique<float[]>(batch_config[2] * max_detections_);
+    out_classes_d_ =
+        cuda_utils::make_unique<int32_t[]>(batch_config[2] * max_detections_);
   }
   if (multitask_) {
-    //Allocate buffer for segmentations
-    segmentation_out_elem_num_ = 0 ;
+    // Allocate buffer for segmentations
+    segmentation_out_elem_num_ = 0;
     for (int m = 0; m < multitask_; m++) {
-      const auto output_dims = trt_common_->getBindingDimensions(m+2); //0 : input, 1 : output for detections
-      size_t out_elem_num = std::accumulate(
-					    output_dims.d + 1, output_dims.d + output_dims.nbDims, 1, std::multiplies<int>());
+      const auto output_dims = trt_common_->getBindingDimensions(
+          m + 2);  // 0 : input, 1 : output for detections
+      size_t out_elem_num =
+          std::accumulate(output_dims.d + 1, output_dims.d + output_dims.nbDims,
+                          1, std::multiplies<int>());
       out_elem_num = out_elem_num * batch_config[2];
       segmentation_out_elem_num_ += out_elem_num;
     }
-    segmentation_out_elem_num_per_batch_ = static_cast<int>(segmentation_out_elem_num_ / batch_config[2]);
-    segmentation_out_prob_d_ = cuda_utils::make_unique<float[]>(segmentation_out_elem_num_);
-    segmentation_out_prob_h_ = cuda_utils::make_unique_host<float[]>(segmentation_out_elem_num_, cudaHostAllocPortable);
-  }  
+    segmentation_out_elem_num_per_batch_ =
+        static_cast<int>(segmentation_out_elem_num_ / batch_config[2]);
+    segmentation_out_prob_d_ =
+        cuda_utils::make_unique<float[]>(segmentation_out_elem_num_);
+    segmentation_out_prob_h_ = cuda_utils::make_unique_host<float[]>(
+        segmentation_out_elem_num_, cudaHostAllocPortable);
+  }
   if (use_gpu_preprocess) {
     use_gpu_preprocess_ = true;
     image_buf_h_ = nullptr;
@@ -271,8 +290,7 @@ TrtYoloX::TrtYoloX(
   }
 }
 
-TrtYoloX::~TrtYoloX()
-{
+TrtYoloX::~TrtYoloX() {
   if (use_gpu_preprocess_) {
     if (image_buf_h_) {
       image_buf_h_.reset();
@@ -282,12 +300,11 @@ TrtYoloX::~TrtYoloX()
     }
     if (argmax_buf_d_) {
       argmax_buf_d_.reset();
-    }    
+    }
   }
 }
 
-void TrtYoloX::initPreprocessBuffer(int width, int height)
-{
+void TrtYoloX::initPreprocessBuffer(int width, int height) {
   // if size of source input has been changed...
   if (src_width_ != -1 || src_height_ != -1) {
     if (width != src_width_ || height != src_height_) {
@@ -304,9 +321,9 @@ void TrtYoloX::initPreprocessBuffer(int width, int height)
   src_height_ = height;
   if (use_gpu_preprocess_) {
     auto input_dims = trt_common_->getBindingDimensions(0);
-    bool const hasRuntimeDim = std::any_of(
-      input_dims.d, input_dims.d + input_dims.nbDims,
-      [](int32_t input_dim) { return input_dim == -1; });
+    bool const hasRuntimeDim =
+        std::any_of(input_dims.d, input_dims.d + input_dims.nbDims,
+                    [](int32_t input_dim) { return input_dim == -1; });
     if (hasRuntimeDim) {
       input_dims.d[0] = batch_size_;
     }
@@ -322,40 +339,42 @@ void TrtYoloX::initPreprocessBuffer(int width, int height)
         scales_.emplace_back(scale);
       }
       image_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(
-        width * height * 3 * batch_size_, cudaHostAllocWriteCombined);
-      image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(width * height * 3 * batch_size_);
+          width * height * 3 * batch_size_, cudaHostAllocWriteCombined);
+      image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(width * height *
+                                                              3 * batch_size_);
     }
     if (multitask_) {
       size_t argmax_out_elem_num_ = 0;
       for (int m = 0; m < multitask_; m++) {
-	const auto output_dims = trt_common_->getBindingDimensions(m+2); //0 : input, 1 : output for detections
-	const float scale = std::min(output_dims.d[3] / float(width), output_dims.d[2] / float(height));
-	int out_w = (int)(width*scale);
-	int out_h = (int)(height*scale);		
-	//	size_t out_elem_num = std::accumulate(
-	//output_dims.d + 1, output_dims.d + output_dims.nbDims, 1, std::multiplies<int>());
-      //	out_elem_num = out_elem_num * batch_size_;
-	size_t out_elem_num = out_w * out_h * batch_size_;      
-	argmax_out_elem_num_ += out_elem_num;
+        const auto output_dims = trt_common_->getBindingDimensions(
+            m + 2);  // 0 : input, 1 : output for detections
+        const float scale = std::min(output_dims.d[3] / float(width),
+                                     output_dims.d[2] / float(height));
+        int out_w = (int)(width * scale);
+        int out_h = (int)(height * scale);
+        //	size_t out_elem_num = std::accumulate(
+        // output_dims.d + 1, output_dims.d + output_dims.nbDims, 1,
+        // std::multiplies<int>());
+        //	out_elem_num = out_elem_num * batch_size_;
+        size_t out_elem_num = out_w * out_h * batch_size_;
+        argmax_out_elem_num_ += out_elem_num;
       }
-      argmax_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(argmax_out_elem_num_, cudaHostAllocWriteCombined);                
-      argmax_buf_d_ = cuda_utils::make_unique<unsigned char[]>(argmax_out_elem_num_);
+      argmax_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(
+          argmax_out_elem_num_, cudaHostAllocWriteCombined);
+      argmax_buf_d_ =
+          cuda_utils::make_unique<unsigned char[]>(argmax_out_elem_num_);
     }
   }
 }
 
-void TrtYoloX::printProfiling(void)
-{
-  trt_common_->printProfiling();
-}
+void TrtYoloX::printProfiling(void) { trt_common_->printProfiling(); }
 
-void TrtYoloX::preprocessGpu(const std::vector<cv::Mat> & images)
-{
+void TrtYoloX::preprocessGpu(const std::vector<cv::Mat> &images) {
   const auto batch_size = images.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
 
   input_dims.d[0] = batch_size;
-  for (const auto & image : images) {
+  for (const auto &image : images) {
     // if size of source input has been changed...
     int width = image.cols;
     int height = image.rows;
@@ -368,12 +387,12 @@ void TrtYoloX::preprocessGpu(const std::vector<cv::Mat> & images)
         if (image_buf_d_) {
           image_buf_d_.reset();
         }
-	if (argmax_buf_h_) {
-	  argmax_buf_h_.reset();
-	}
-	if (argmax_buf_d_) {
-	  argmax_buf_d_.reset();
-	}
+        if (argmax_buf_h_) {
+          argmax_buf_h_.reset();
+        }
+        if (argmax_buf_d_) {
+          argmax_buf_d_.reset();
+        }
       }
     }
     src_width_ = width;
@@ -386,35 +405,35 @@ void TrtYoloX::preprocessGpu(const std::vector<cv::Mat> & images)
   const float input_height = static_cast<float>(input_dims.d[2]);
   const float input_width = static_cast<float>(input_dims.d[3]);
   int b = 0;
-  for (const auto & image : images) {
+  for (const auto &image : images) {
     if (!image_buf_h_) {
-      const float scale = std::min(input_width / image.cols, input_height / image.rows);
+      const float scale =
+          std::min(input_width / image.cols, input_height / image.rows);
       scales_.emplace_back(scale);
       image_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(
-        image.cols * image.rows * 3 * batch_size, cudaHostAllocWriteCombined);
-      image_buf_d_ =
-        cuda_utils::make_unique<unsigned char[]>(image.cols * image.rows * 3 * batch_size);
+          image.cols * image.rows * 3 * batch_size, cudaHostAllocWriteCombined);
+      image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(
+          image.cols * image.rows * 3 * batch_size);
     }
     int index = b * image.cols * image.rows * 3;
     // Copy into pinned memory
-    memcpy(
-      image_buf_h_.get() + index, &image.data[0],
-      image.cols * image.rows * 3 * sizeof(unsigned char));
+    memcpy(image_buf_h_.get() + index, &image.data[0],
+           image.cols * image.rows * 3 * sizeof(unsigned char));
     b++;
   }
   // Copy into device memory
   CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    image_buf_d_.get(), image_buf_h_.get(),
-    images[0].cols * images[0].rows * 3 * batch_size * sizeof(unsigned char),
-    cudaMemcpyHostToDevice, *stream_));
+      image_buf_d_.get(), image_buf_h_.get(),
+      images[0].cols * images[0].rows * 3 * batch_size * sizeof(unsigned char),
+      cudaMemcpyHostToDevice, *stream_));
   // Preprocess on GPU
   resize_bilinear_letterbox_nhwc_to_nchw32_batch_gpu(
-    input_d_.get(), image_buf_d_.get(), input_width, input_height, 3, images[0].cols,
-    images[0].rows, 3, batch_size, static_cast<float>(norm_factor_), *stream_);
+      input_d_.get(), image_buf_d_.get(), input_width, input_height, 3,
+      images[0].cols, images[0].rows, 3, batch_size,
+      static_cast<float>(norm_factor_), *stream_);
 }
 
-void TrtYoloX::preprocess(const std::vector<cv::Mat> & images)
-{
+void TrtYoloX::preprocess(const std::vector<cv::Mat> &images) {
   const auto batch_size = images.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
   input_dims.d[0] = batch_size;
@@ -425,20 +444,21 @@ void TrtYoloX::preprocess(const std::vector<cv::Mat> & images)
   scales_.clear();
   bool letterbox = true;
   if (letterbox) {
-    for (const auto & image : images) {
+    for (const auto &image : images) {
       cv::Mat dst_image;
-      const float scale = std::min(input_width / image.cols, input_height / image.rows);
+      const float scale =
+          std::min(input_width / image.cols, input_height / image.rows);
       scales_.emplace_back(scale);
       const auto scale_size = cv::Size(image.cols * scale, image.rows * scale);
       cv::resize(image, dst_image, scale_size, 0, 0, cv::INTER_CUBIC);
       const auto bottom = input_height - dst_image.rows;
       const auto right = input_width - dst_image.cols;
-      copyMakeBorder(
-        dst_image, dst_image, 0, bottom, 0, right, cv::BORDER_CONSTANT, {114, 114, 114});
+      copyMakeBorder(dst_image, dst_image, 0, bottom, 0, right,
+                     cv::BORDER_CONSTANT, {114, 114, 114});
       dst_images.emplace_back(dst_image);
     }
   } else {
-    for (const auto & image : images) {
+    for (const auto &image : images) {
       cv::Mat dst_image;
       const float scale = -1.0;
       scales_.emplace_back(scale);
@@ -448,19 +468,20 @@ void TrtYoloX::preprocess(const std::vector<cv::Mat> & images)
     }
   }
   const auto chw_images = cv::dnn::blobFromImages(
-    dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
+      dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
 
   const auto data_length = chw_images.total();
   input_h_.reserve(data_length);
   const auto flat = chw_images.reshape(1, data_length);
   input_h_ = chw_images.isContinuous() ? flat : flat.clone();
-  CHECK_CUDA_ERROR(cudaMemcpy(
-    input_d_.get(), input_h_.data(), input_h_.size() * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(input_d_.get(), input_h_.data(),
+                              input_h_.size() * sizeof(float),
+                              cudaMemcpyHostToDevice));
   // No Need for Sync
 }
 
-bool TrtYoloX::doInference(const std::vector<cv::Mat> & images, ObjectArrays & objects)
-{
+bool TrtYoloX::doInference(const std::vector<cv::Mat> &images,
+                           ObjectArrays &objects) {
   if (!trt_common_->isInitialized()) {
     return false;
   }
@@ -478,14 +499,13 @@ bool TrtYoloX::doInference(const std::vector<cv::Mat> & images, ObjectArrays & o
   }
 }
 
-void TrtYoloX::preprocessWithRoiGpu(
-  const std::vector<cv::Mat> & images, const std::vector<cv::Rect> & rois)
-{
+void TrtYoloX::preprocessWithRoiGpu(const std::vector<cv::Mat> &images,
+                                    const std::vector<cv::Rect> &rois) {
   const auto batch_size = images.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
 
   input_dims.d[0] = batch_size;
-  for (const auto & image : images) {
+  for (const auto &image : images) {
     // if size of source input has been changed...
     int width = image.cols;
     int height = image.rows;
@@ -512,28 +532,28 @@ void TrtYoloX::preprocessWithRoiGpu(
   scales_.clear();
 
   if (!roi_h_) {
-    roi_h_ = cuda_utils::make_unique_host<Roi[]>(batch_size, cudaHostAllocWriteCombined);
+    roi_h_ = cuda_utils::make_unique_host<Roi[]>(batch_size,
+                                                 cudaHostAllocWriteCombined);
     roi_d_ = cuda_utils::make_unique<Roi[]>(batch_size);
   }
 
-  for (const auto & image : images) {
-    const float scale = std::min(
-      input_width / static_cast<float>(rois[b].width),
-      input_height / static_cast<float>(rois[b].height));
+  for (const auto &image : images) {
+    const float scale =
+        std::min(input_width / static_cast<float>(rois[b].width),
+                 input_height / static_cast<float>(rois[b].height));
     scales_.emplace_back(scale);
     if (!image_buf_h_) {
       image_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(
-        image.cols * image.rows * 3 * batch_size, cudaHostAllocWriteCombined);
-      image_buf_d_ =
-        cuda_utils::make_unique<unsigned char[]>(image.cols * image.rows * 3 * batch_size);
+          image.cols * image.rows * 3 * batch_size, cudaHostAllocWriteCombined);
+      image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(
+          image.cols * image.rows * 3 * batch_size);
     }
     int index = b * image.cols * image.rows * 3;
     // Copy into pinned memory
-    // memcpy(&(m_h_img[index]), &image.data[0], image.cols * image.rows * 3 * sizeof(unsigned
-    // char));
-    memcpy(
-      image_buf_h_.get() + index, &image.data[0],
-      image.cols * image.rows * 3 * sizeof(unsigned char));
+    // memcpy(&(m_h_img[index]), &image.data[0], image.cols * image.rows * 3 *
+    // sizeof(unsigned char));
+    memcpy(image_buf_h_.get() + index, &image.data[0],
+           image.cols * image.rows * 3 * sizeof(unsigned char));
     roi_h_[b].x = rois[b].x;
     roi_h_[b].y = rois[b].y;
     roi_h_[b].w = rois[b].width;
@@ -542,19 +562,20 @@ void TrtYoloX::preprocessWithRoiGpu(
   }
   // Copy into device memory
   CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    image_buf_d_.get(), image_buf_h_.get(),
-    images[0].cols * images[0].rows * 3 * batch_size * sizeof(unsigned char),
-    cudaMemcpyHostToDevice, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    roi_d_.get(), roi_h_.get(), batch_size * sizeof(Roi), cudaMemcpyHostToDevice, *stream_));
+      image_buf_d_.get(), image_buf_h_.get(),
+      images[0].cols * images[0].rows * 3 * batch_size * sizeof(unsigned char),
+      cudaMemcpyHostToDevice, *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(roi_d_.get(), roi_h_.get(),
+                                   batch_size * sizeof(Roi),
+                                   cudaMemcpyHostToDevice, *stream_));
   crop_resize_bilinear_letterbox_nhwc_to_nchw32_batch_gpu(
-    input_d_.get(), image_buf_d_.get(), input_width, input_height, 3, roi_d_.get(), images[0].cols,
-    images[0].rows, 3, batch_size, static_cast<float>(norm_factor_), *stream_);
+      input_d_.get(), image_buf_d_.get(), input_width, input_height, 3,
+      roi_d_.get(), images[0].cols, images[0].rows, 3, batch_size,
+      static_cast<float>(norm_factor_), *stream_);
 }
 
-void TrtYoloX::preprocessWithRoi(
-  const std::vector<cv::Mat> & images, const std::vector<cv::Rect> & rois)
-{
+void TrtYoloX::preprocessWithRoi(const std::vector<cv::Mat> &images,
+                                 const std::vector<cv::Rect> &rois) {
   const auto batch_size = images.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
   input_dims.d[0] = batch_size;
@@ -566,24 +587,25 @@ void TrtYoloX::preprocessWithRoi(
   bool letterbox = true;
   int b = 0;
   if (letterbox) {
-    for (const auto & image : images) {
+    for (const auto &image : images) {
       cv::Mat dst_image;
       cv::Mat cropped = image(rois[b]);
-      const float scale = std::min(
-        input_width / static_cast<float>(rois[b].width),
-        input_height / static_cast<float>(rois[b].height));
+      const float scale =
+          std::min(input_width / static_cast<float>(rois[b].width),
+                   input_height / static_cast<float>(rois[b].height));
       scales_.emplace_back(scale);
-      const auto scale_size = cv::Size(rois[b].width * scale, rois[b].height * scale);
+      const auto scale_size =
+          cv::Size(rois[b].width * scale, rois[b].height * scale);
       cv::resize(cropped, dst_image, scale_size, 0, 0, cv::INTER_CUBIC);
       const auto bottom = input_height - dst_image.rows;
       const auto right = input_width - dst_image.cols;
-      copyMakeBorder(
-        dst_image, dst_image, 0, bottom, 0, right, cv::BORDER_CONSTANT, {114, 114, 114});
+      copyMakeBorder(dst_image, dst_image, 0, bottom, 0, right,
+                     cv::BORDER_CONSTANT, {114, 114, 114});
       dst_images.emplace_back(dst_image);
       b++;
     }
   } else {
-    for (const auto & image : images) {
+    for (const auto &image : images) {
       cv::Mat dst_image;
       const float scale = -1.0;
       scales_.emplace_back(scale);
@@ -593,19 +615,20 @@ void TrtYoloX::preprocessWithRoi(
     }
   }
   const auto chw_images = cv::dnn::blobFromImages(
-    dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
+      dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
 
   const auto data_length = chw_images.total();
   input_h_.reserve(data_length);
   const auto flat = chw_images.reshape(1, data_length);
   input_h_ = chw_images.isContinuous() ? flat : flat.clone();
-  CHECK_CUDA_ERROR(cudaMemcpy(
-    input_d_.get(), input_h_.data(), input_h_.size() * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(input_d_.get(), input_h_.data(),
+                              input_h_.size() * sizeof(float),
+                              cudaMemcpyHostToDevice));
   // No Need for Sync
 }
 
-void TrtYoloX::multiScalePreprocessGpu(const cv::Mat & image, const std::vector<cv::Rect> & rois)
-{
+void TrtYoloX::multiScalePreprocessGpu(const cv::Mat &image,
+                                       const std::vector<cv::Rect> &rois) {
   const auto batch_size = rois.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
 
@@ -637,14 +660,15 @@ void TrtYoloX::multiScalePreprocessGpu(const cv::Mat & image, const std::vector<
   scales_.clear();
 
   if (!roi_h_) {
-    roi_h_ = cuda_utils::make_unique_host<Roi[]>(batch_size, cudaHostAllocWriteCombined);
+    roi_h_ = cuda_utils::make_unique_host<Roi[]>(batch_size,
+                                                 cudaHostAllocWriteCombined);
     roi_d_ = cuda_utils::make_unique<Roi[]>(batch_size);
   }
 
   for (size_t b = 0; b < rois.size(); b++) {
-    const float scale = std::min(
-      input_width / static_cast<float>(rois[b].width),
-      input_height / static_cast<float>(rois[b].height));
+    const float scale =
+        std::min(input_width / static_cast<float>(rois[b].width),
+                 input_height / static_cast<float>(rois[b].height));
     scales_.emplace_back(scale);
     roi_h_[b].x = rois[b].x;
     roi_h_[b].y = rois[b].y;
@@ -653,28 +677,31 @@ void TrtYoloX::multiScalePreprocessGpu(const cv::Mat & image, const std::vector<
   }
   if (!image_buf_h_) {
     image_buf_h_ = cuda_utils::make_unique_host<unsigned char[]>(
-      image.cols * image.rows * 3 * 1, cudaHostAllocWriteCombined);
-    image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(image.cols * image.rows * 3 * 1);
+        image.cols * image.rows * 3 * 1, cudaHostAllocWriteCombined);
+    image_buf_d_ = cuda_utils::make_unique<unsigned char[]>(image.cols *
+                                                            image.rows * 3 * 1);
   }
   int index = 0 * image.cols * image.rows * 3;
   // Copy into pinned memory
-  memcpy(
-    image_buf_h_.get() + index, &image.data[0],
-    image.cols * image.rows * 3 * sizeof(unsigned char));
+  memcpy(image_buf_h_.get() + index, &image.data[0],
+         image.cols * image.rows * 3 * sizeof(unsigned char));
 
   // Copy into device memory
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    image_buf_d_.get(), image_buf_h_.get(), image.cols * image.rows * 3 * 1 * sizeof(unsigned char),
-    cudaMemcpyHostToDevice, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    roi_d_.get(), roi_h_.get(), batch_size * sizeof(Roi), cudaMemcpyHostToDevice, *stream_));
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(image_buf_d_.get(), image_buf_h_.get(),
+                      image.cols * image.rows * 3 * 1 * sizeof(unsigned char),
+                      cudaMemcpyHostToDevice, *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(roi_d_.get(), roi_h_.get(),
+                                   batch_size * sizeof(Roi),
+                                   cudaMemcpyHostToDevice, *stream_));
   multi_scale_resize_bilinear_letterbox_nhwc_to_nchw32_batch_gpu(
-    input_d_.get(), image_buf_d_.get(), input_width, input_height, 3, roi_d_.get(), image.cols,
-    image.rows, 3, batch_size, static_cast<float>(norm_factor_), *stream_);
+      input_d_.get(), image_buf_d_.get(), input_width, input_height, 3,
+      roi_d_.get(), image.cols, image.rows, 3, batch_size,
+      static_cast<float>(norm_factor_), *stream_);
 }
 
-void TrtYoloX::multiScalePreprocess(const cv::Mat & image, const std::vector<cv::Rect> & rois)
-{
+void TrtYoloX::multiScalePreprocess(const cv::Mat &image,
+                                    const std::vector<cv::Rect> &rois) {
   const auto batch_size = rois.size();
   auto input_dims = trt_common_->getBindingDimensions(0);
   input_dims.d[0] = batch_size;
@@ -684,34 +711,36 @@ void TrtYoloX::multiScalePreprocess(const cv::Mat & image, const std::vector<cv:
   std::vector<cv::Mat> dst_images;
   scales_.clear();
 
-  for (const auto & roi : rois) {
+  for (const auto &roi : rois) {
     cv::Mat dst_image;
     cv::Mat cropped = image(roi);
-    const float scale = std::min(
-      input_width / static_cast<float>(roi.width), input_height / static_cast<float>(roi.height));
+    const float scale = std::min(input_width / static_cast<float>(roi.width),
+                                 input_height / static_cast<float>(roi.height));
     scales_.emplace_back(scale);
     const auto scale_size = cv::Size(roi.width * scale, roi.height * scale);
     cv::resize(cropped, dst_image, scale_size, 0, 0, cv::INTER_CUBIC);
     const auto bottom = input_height - dst_image.rows;
     const auto right = input_width - dst_image.cols;
-    copyMakeBorder(dst_image, dst_image, 0, bottom, 0, right, cv::BORDER_CONSTANT, {114, 114, 114});
+    copyMakeBorder(dst_image, dst_image, 0, bottom, 0, right,
+                   cv::BORDER_CONSTANT, {114, 114, 114});
     dst_images.emplace_back(dst_image);
   }
   const auto chw_images = cv::dnn::blobFromImages(
-    dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
+      dst_images, norm_factor_, cv::Size(), cv::Scalar(), false, false, CV_32F);
 
   const auto data_length = chw_images.total();
   input_h_.reserve(data_length);
   const auto flat = chw_images.reshape(1, data_length);
   input_h_ = chw_images.isContinuous() ? flat : flat.clone();
-  CHECK_CUDA_ERROR(cudaMemcpy(
-    input_d_.get(), input_h_.data(), input_h_.size() * sizeof(float), cudaMemcpyHostToDevice));
+  CHECK_CUDA_ERROR(cudaMemcpy(input_d_.get(), input_h_.data(),
+                              input_h_.size() * sizeof(float),
+                              cudaMemcpyHostToDevice));
   // No Need for Sync
 }
 
-bool TrtYoloX::doInferenceWithRoi(
-  const std::vector<cv::Mat> & images, ObjectArrays & objects, const std::vector<cv::Rect> & rois)
-{
+bool TrtYoloX::doInferenceWithRoi(const std::vector<cv::Mat> &images,
+                                  ObjectArrays &objects,
+                                  const std::vector<cv::Rect> &rois) {
   if (!trt_common_->isInitialized()) {
     return false;
   }
@@ -728,9 +757,9 @@ bool TrtYoloX::doInferenceWithRoi(
   }
 }
 
-bool TrtYoloX::doMultiScaleInference(
-  const cv::Mat & image, ObjectArrays & objects, const std::vector<cv::Rect> & rois)
-{
+bool TrtYoloX::doMultiScaleInference(const cv::Mat &image,
+                                     ObjectArrays &objects,
+                                     const std::vector<cv::Rect> &rois) {
   std::vector<cv::Mat> images;
   if (!trt_common_->isInitialized()) {
     return false;
@@ -749,11 +778,11 @@ bool TrtYoloX::doMultiScaleInference(
 
 // This method is assumed to be called when specified YOLOX model contains
 // EfficientNMS_TRT module.
-bool TrtYoloX::feedforward(const std::vector<cv::Mat> & images, ObjectArrays & objects)
-{
-  std::vector<void *> buffers = {
-    input_d_.get(), out_num_detections_d_.get(), out_boxes_d_.get(), out_scores_d_.get(),
-    out_classes_d_.get()};
+bool TrtYoloX::feedforward(const std::vector<cv::Mat> &images,
+                           ObjectArrays &objects) {
+  std::vector<void *> buffers = {input_d_.get(), out_num_detections_d_.get(),
+                                 out_boxes_d_.get(), out_scores_d_.get(),
+                                 out_classes_d_.get()};
 
   trt_common_->enqueueV2(buffers.data(), *stream_, nullptr);
 
@@ -764,17 +793,19 @@ bool TrtYoloX::feedforward(const std::vector<cv::Mat> & images, ObjectArrays & o
   auto out_classes = std::make_unique<int32_t[]>(batch_size * max_detections_);
 
   CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_num_detections.get(), out_num_detections_d_.get(), sizeof(int32_t) * batch_size,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_boxes.get(), out_boxes_d_.get(), sizeof(float) * 4 * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_scores.get(), out_scores_d_.get(), sizeof(float) * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_classes.get(), out_classes_d_.get(), sizeof(int32_t) * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
+      out_num_detections.get(), out_num_detections_d_.get(),
+      sizeof(int32_t) * batch_size, cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(out_boxes.get(), out_boxes_d_.get(),
+                      sizeof(float) * 4 * batch_size * max_detections_,
+                      cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(out_scores.get(), out_scores_d_.get(),
+                                   sizeof(float) * batch_size * max_detections_,
+                                   cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(out_classes.get(), out_classes_d_.get(),
+                      sizeof(int32_t) * batch_size * max_detections_,
+                      cudaMemcpyDeviceToHost, *stream_));
   cudaStreamSynchronize(*stream_);
   objects.clear();
   for (size_t i = 0; i < batch_size; ++i) {
@@ -784,9 +815,12 @@ bool TrtYoloX::feedforward(const std::vector<cv::Mat> & images, ObjectArrays & o
     for (size_t j = 0; j < num_detection; ++j) {
       Object object{};
       const auto x1 = out_boxes[i * max_detections_ * 4 + j * 4] / scales_[i];
-      const auto y1 = out_boxes[i * max_detections_ * 4 + j * 4 + 1] / scales_[i];
-      const auto x2 = out_boxes[i * max_detections_ * 4 + j * 4 + 2] / scales_[i];
-      const auto y2 = out_boxes[i * max_detections_ * 4 + j * 4 + 3] / scales_[i];
+      const auto y1 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 1] / scales_[i];
+      const auto x2 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 2] / scales_[i];
+      const auto y2 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 3] / scales_[i];
       object.x_offset = std::clamp(0, static_cast<int32_t>(x1), images[i].cols);
       object.y_offset = std::clamp(0, static_cast<int32_t>(y1), images[i].rows);
       object.width = static_cast<int32_t>(std::max(0.0F, x2 - x1));
@@ -800,67 +834,80 @@ bool TrtYoloX::feedforward(const std::vector<cv::Mat> & images, ObjectArrays & o
   return true;
 }
 
-bool TrtYoloX::feedforwardAndDecode(const std::vector<cv::Mat> & images, ObjectArrays & objects)
-{
+bool TrtYoloX::feedforwardAndDecode(const std::vector<cv::Mat> &images,
+                                    ObjectArrays &objects) {
   std::vector<void *> buffers = {input_d_.get(), out_prob_d_.get()};
   if (multitask_) {
-    buffers = {input_d_.get(), out_prob_d_.get(), segmentation_out_prob_d_.get()};
+    buffers = {input_d_.get(), out_prob_d_.get(),
+               segmentation_out_prob_d_.get()};
   }
   trt_common_->enqueueV2(buffers.data(), *stream_, nullptr);
 
   const auto batch_size = images.size();
 
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_prob_h_.get(), out_prob_d_.get(), sizeof(float) * out_elem_num_, cudaMemcpyDeviceToHost,
-    *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(out_prob_h_.get(), out_prob_d_.get(),
+                                   sizeof(float) * out_elem_num_,
+                                   cudaMemcpyDeviceToHost, *stream_));
   if (multitask_) {
-    CHECK_CUDA_ERROR(cudaMemcpyAsync(
-				     segmentation_out_prob_h_.get(), segmentation_out_prob_d_.get(), sizeof(float) * segmentation_out_elem_num_, cudaMemcpyDeviceToHost, *stream_));    
+    CHECK_CUDA_ERROR(cudaMemcpyAsync(segmentation_out_prob_h_.get(),
+                                     segmentation_out_prob_d_.get(),
+                                     sizeof(float) * segmentation_out_elem_num_,
+                                     cudaMemcpyDeviceToHost, *stream_));
   }
   cudaStreamSynchronize(*stream_);
   objects.clear();
 
   for (size_t i = 0; i < batch_size; ++i) {
     auto image_size = images[i].size();
-    float * batch_prob = out_prob_h_.get() + (i * out_elem_num_per_batch_);
+    float *batch_prob = out_prob_h_.get() + (i * out_elem_num_per_batch_);
     ObjectArray object_array;
     decodeOutputs(batch_prob, object_array, scales_[i], image_size);
     objects.emplace_back(object_array);
     if (multitask_) {
       segmentation_masks_.clear();
-      float *segmentation_results = segmentation_out_prob_h_.get() + (i * segmentation_out_elem_num_per_batch_);
+      float *segmentation_results = segmentation_out_prob_h_.get() +
+                                    (i * segmentation_out_elem_num_per_batch_);
       size_t counter = 0;
-      int batch = (int)(segmentation_out_elem_num_ / segmentation_out_elem_num_per_batch_);
+      int batch = (int)(segmentation_out_elem_num_ /
+                        segmentation_out_elem_num_per_batch_);
       for (int m = 0; m < multitask_; m++) {
-	const auto output_dims = trt_common_->getBindingDimensions(m+2); //0 : input, 1 : output for detections
-	size_t out_elem_num = std::accumulate(
-					      output_dims.d + 1, output_dims.d + output_dims.nbDims, 1, std::multiplies<int>());
-	out_elem_num = out_elem_num * batch;
-	const float scale = std::min(output_dims.d[3] / float(image_size.width), output_dims.d[2] / float(image_size.height));
-	int out_w = (int)(image_size.width*scale);
-	int out_h = (int)(image_size.height*scale);
-	cv::Mat mask;
-	if (use_gpu_preprocess_) {
-	  float *d_segmentation_results = segmentation_out_prob_d_.get() + (i * segmentation_out_elem_num_per_batch_);
-	  mask = getMaskImageGpu(&(d_segmentation_results[counter]), output_dims, out_w, out_h, i);
-	} else {
-	  mask = getMaskImage(&(segmentation_results[counter]), output_dims, out_w, out_h);
-	}
-	segmentation_masks_.push_back(mask);
-	counter += out_elem_num;
+        const auto output_dims = trt_common_->getBindingDimensions(
+            m + 2);  // 0 : input, 1 : output for detections
+        size_t out_elem_num = std::accumulate(
+            output_dims.d + 1, output_dims.d + output_dims.nbDims, 1,
+            std::multiplies<int>());
+        out_elem_num = out_elem_num * batch;
+        const float scale =
+            std::min(output_dims.d[3] / float(image_size.width),
+                     output_dims.d[2] / float(image_size.height));
+        int out_w = (int)(image_size.width * scale);
+        int out_h = (int)(image_size.height * scale);
+        cv::Mat mask;
+        if (use_gpu_preprocess_) {
+          float *d_segmentation_results =
+              segmentation_out_prob_d_.get() +
+              (i * segmentation_out_elem_num_per_batch_);
+          mask = getMaskImageGpu(&(d_segmentation_results[counter]),
+                                 output_dims, out_w, out_h, i);
+        } else {
+          mask = getMaskImage(&(segmentation_results[counter]), output_dims,
+                              out_w, out_h);
+        }
+        segmentation_masks_.push_back(mask);
+        counter += out_elem_num;
       }
-    }    
+    }
   }
   return true;
 }
 
 // This method is assumed to be called when specified YOLOX model contains
 // EfficientNMS_TRT module.
-bool TrtYoloX::multiScaleFeedforward(const cv::Mat & image, int batch_size, ObjectArrays & objects)
-{
-  std::vector<void *> buffers = {
-    input_d_.get(), out_num_detections_d_.get(), out_boxes_d_.get(), out_scores_d_.get(),
-    out_classes_d_.get()};
+bool TrtYoloX::multiScaleFeedforward(const cv::Mat &image, int batch_size,
+                                     ObjectArrays &objects) {
+  std::vector<void *> buffers = {input_d_.get(), out_num_detections_d_.get(),
+                                 out_boxes_d_.get(), out_scores_d_.get(),
+                                 out_classes_d_.get()};
 
   trt_common_->enqueueV2(buffers.data(), *stream_, nullptr);
 
@@ -870,17 +917,19 @@ bool TrtYoloX::multiScaleFeedforward(const cv::Mat & image, int batch_size, Obje
   auto out_classes = std::make_unique<int32_t[]>(batch_size * max_detections_);
 
   CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_num_detections.get(), out_num_detections_d_.get(), sizeof(int32_t) * batch_size,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_boxes.get(), out_boxes_d_.get(), sizeof(float) * 4 * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_scores.get(), out_scores_d_.get(), sizeof(float) * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_classes.get(), out_classes_d_.get(), sizeof(int32_t) * batch_size * max_detections_,
-    cudaMemcpyDeviceToHost, *stream_));
+      out_num_detections.get(), out_num_detections_d_.get(),
+      sizeof(int32_t) * batch_size, cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(out_boxes.get(), out_boxes_d_.get(),
+                      sizeof(float) * 4 * batch_size * max_detections_,
+                      cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(out_scores.get(), out_scores_d_.get(),
+                                   sizeof(float) * batch_size * max_detections_,
+                                   cudaMemcpyDeviceToHost, *stream_));
+  CHECK_CUDA_ERROR(
+      cudaMemcpyAsync(out_classes.get(), out_classes_d_.get(),
+                      sizeof(int32_t) * batch_size * max_detections_,
+                      cudaMemcpyDeviceToHost, *stream_));
   cudaStreamSynchronize(*stream_);
 
   objects.clear();
@@ -890,9 +939,12 @@ bool TrtYoloX::multiScaleFeedforward(const cv::Mat & image, int batch_size, Obje
     for (size_t j = 0; j < num_detection; ++j) {
       Object object{};
       const auto x1 = out_boxes[i * max_detections_ * 4 + j * 4] / scales_[i];
-      const auto y1 = out_boxes[i * max_detections_ * 4 + j * 4 + 1] / scales_[i];
-      const auto x2 = out_boxes[i * max_detections_ * 4 + j * 4 + 2] / scales_[i];
-      const auto y2 = out_boxes[i * max_detections_ * 4 + j * 4 + 3] / scales_[i];
+      const auto y1 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 1] / scales_[i];
+      const auto x2 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 2] / scales_[i];
+      const auto y2 =
+          out_boxes[i * max_detections_ * 4 + j * 4 + 3] / scales_[i];
       object.x_offset = std::clamp(0, static_cast<int32_t>(x1), image.cols);
       object.y_offset = std::clamp(0, static_cast<int32_t>(y1), image.rows);
       object.width = static_cast<int32_t>(std::max(0.0F, x2 - x1));
@@ -906,21 +958,21 @@ bool TrtYoloX::multiScaleFeedforward(const cv::Mat & image, int batch_size, Obje
   return true;
 }
 
-bool TrtYoloX::multiScaleFeedforwardAndDecode(
-  const cv::Mat & image, int batch_size, ObjectArrays & objects)
-{
+bool TrtYoloX::multiScaleFeedforwardAndDecode(const cv::Mat &image,
+                                              int batch_size,
+                                              ObjectArrays &objects) {
   std::vector<void *> buffers = {input_d_.get(), out_prob_d_.get()};
   trt_common_->enqueueV2(buffers.data(), *stream_, nullptr);
 
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-    out_prob_h_.get(), out_prob_d_.get(), sizeof(float) * out_elem_num_, cudaMemcpyDeviceToHost,
-    *stream_));
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(out_prob_h_.get(), out_prob_d_.get(),
+                                   sizeof(float) * out_elem_num_,
+                                   cudaMemcpyDeviceToHost, *stream_));
   cudaStreamSynchronize(*stream_);
   objects.clear();
 
   for (int i = 0; i < batch_size; ++i) {
     auto image_size = image.size();
-    float * batch_prob = out_prob_h_.get() + (i * out_elem_num_per_batch_);
+    float *batch_prob = out_prob_h_.get() + (i * out_elem_num_per_batch_);
     ObjectArray object_array;
     decodeOutputs(batch_prob, object_array, scales_[i], image_size);
     objects.emplace_back(object_array);
@@ -928,15 +980,15 @@ bool TrtYoloX::multiScaleFeedforwardAndDecode(
   return true;
 }
 
-void TrtYoloX::decodeOutputs(
-  float * prob, ObjectArray & objects, float scale, cv::Size & img_size) const
-{
+void TrtYoloX::decodeOutputs(float *prob, ObjectArray &objects, float scale,
+                             cv::Size &img_size) const {
   ObjectArray proposals;
   auto input_dims = trt_common_->getBindingDimensions(0);
   const float input_height = static_cast<float>(input_dims.d[2]);
   const float input_width = static_cast<float>(input_dims.d[3]);
   std::vector<GridAndStride> grid_strides;
-  generateGridsAndStride(input_width, input_height, output_strides_, grid_strides);
+  generateGridsAndStride(input_width, input_height, output_strides_,
+                         grid_strides);
   generateYoloxProposals(grid_strides, prob, score_threshold_, proposals);
 
   qsortDescentInplace(proposals);
@@ -979,9 +1031,8 @@ void TrtYoloX::decodeOutputs(
 }
 
 void TrtYoloX::generateGridsAndStride(
-  const int target_w, const int target_h, const std::vector<int> & strides,
-  std::vector<GridAndStride> & grid_strides) const
-{
+    const int target_w, const int target_h, const std::vector<int> &strides,
+    std::vector<GridAndStride> &grid_strides) const {
   for (auto stride : strides) {
     int num_grid_w = target_w / stride;
     int num_grid_h = target_h / stride;
@@ -993,10 +1044,9 @@ void TrtYoloX::generateGridsAndStride(
   }
 }
 
-void TrtYoloX::generateYoloxProposals(
-  std::vector<GridAndStride> grid_strides, float * feat_blob, float prob_threshold,
-  ObjectArray & objects) const
-{
+void TrtYoloX::generateYoloxProposals(std::vector<GridAndStride> grid_strides,
+                                      float *feat_blob, float prob_threshold,
+                                      ObjectArray &objects) const {
   const int num_anchors = grid_strides.size();
 
   for (int anchor_idx = 0; anchor_idx < num_anchors; anchor_idx++) {
@@ -1039,11 +1089,11 @@ void TrtYoloX::generateYoloxProposals(
         objects.push_back(obj);
       }
     }  // class loop
-  }    // point anchor loop
+  }  // point anchor loop
 }
 
-void TrtYoloX::qsortDescentInplace(ObjectArray & face_objects, int left, int right) const
-{
+void TrtYoloX::qsortDescentInplace(ObjectArray &face_objects, int left,
+                                   int right) const {
   int i = left;
   int j = right;
   float p = face_objects[(left + right) / 2].score;
@@ -1083,26 +1133,25 @@ void TrtYoloX::qsortDescentInplace(ObjectArray & face_objects, int left, int rig
   }
 }
 
-void TrtYoloX::nmsSortedBboxes(
-  const ObjectArray & face_objects, std::vector<int> & picked, float nms_threshold) const
-{
+void TrtYoloX::nmsSortedBboxes(const ObjectArray &face_objects,
+                               std::vector<int> &picked,
+                               float nms_threshold) const {
   picked.clear();
   const int n = face_objects.size();
 
   std::vector<float> areas(n);
   for (int i = 0; i < n; i++) {
-    cv::Rect rect(
-      face_objects[i].x_offset, face_objects[i].y_offset, face_objects[i].width,
-      face_objects[i].height);
+    cv::Rect rect(face_objects[i].x_offset, face_objects[i].y_offset,
+                  face_objects[i].width, face_objects[i].height);
     areas[i] = rect.area();
   }
 
   for (int i = 0; i < n; i++) {
-    const Object & a = face_objects[i];
+    const Object &a = face_objects[i];
 
     int keep = 1;
     for (int j = 0; j < static_cast<int>(picked.size()); j++) {
-      const Object & b = face_objects[picked[j]];
+      const Object &b = face_objects[picked[j]];
 
       // intersection over union
       float inter_area = intersectionArea(a, b);
@@ -1119,43 +1168,44 @@ void TrtYoloX::nmsSortedBboxes(
   }
 }
 
-cv::Mat TrtYoloX::getMaskImageGpu(float *d_prob, nvinfer1::Dims dims, int out_w, int out_h, int b)
-{
-  //NCHW
+cv::Mat TrtYoloX::getMaskImageGpu(float *d_prob, nvinfer1::Dims dims, int out_w,
+                                  int out_h, int b) {
+  // NCHW
   int classes = dims.d[1];
   int height = dims.d[2];
   int width = dims.d[3];
   cv::Mat mask = cv::Mat::zeros(out_h, out_w, CV_8UC1);
   int index = b * out_w * out_h;
   argmax_gpu((unsigned char *)argmax_buf_d_.get() + index, d_prob, out_w, out_h,
-	     width, height, classes, 1, *stream_);
-  CHECK_CUDA_ERROR(cudaMemcpyAsync(
-				   argmax_buf_h_.get(), argmax_buf_d_.get(), sizeof(unsigned char) * 1 * out_w * out_h,
-    cudaMemcpyDeviceToHost, *stream_));
+             width, height, classes, 1, *stream_);
+  CHECK_CUDA_ERROR(cudaMemcpyAsync(argmax_buf_h_.get(), argmax_buf_d_.get(),
+                                   sizeof(unsigned char) * 1 * out_w * out_h,
+                                   cudaMemcpyDeviceToHost, *stream_));
   cudaStreamSynchronize(*stream_);
-  std::memcpy(mask.data, argmax_buf_h_.get() + index,  sizeof(unsigned char) * 1 * out_w * out_h);
+  std::memcpy(mask.data, argmax_buf_h_.get() + index,
+              sizeof(unsigned char) * 1 * out_w * out_h);
   return mask;
 }
 
-cv::Mat TrtYoloX::getMaskImage(float *prob, nvinfer1::Dims dims, int out_w, int out_h)
-{
-  //NCHW
+cv::Mat TrtYoloX::getMaskImage(float *prob, nvinfer1::Dims dims, int out_w,
+                               int out_h) {
+  // NCHW
   int classes = dims.d[1];
   int height = dims.d[2];
   int width = dims.d[3];
   cv::Mat mask = cv::Mat::zeros(out_h, out_w, CV_8UC1);
-  //argmax
-  //#pragma omp parallel for      
+  // argmax
+  // #pragma omp parallel for
   for (int y = 0; y < out_h; y++) {
     for (int x = 0; x < out_w; x++) {
       float max = 0.0;
       int index = 0;
       for (int c = 0; c < classes; c++) {
-	float value = prob[c * height * width + y * width + x];
-	if (max < value) {
-	  max = value;
-	  index = c;
-	}
+        float value = prob[c * height * width + y * width + x];
+        if (max < value) {
+          max = value;
+          index = c;
+        }
       }
       mask.at<unsigned char>(y, x) = index;
     }
@@ -1163,41 +1213,36 @@ cv::Mat TrtYoloX::getMaskImage(float *prob, nvinfer1::Dims dims, int out_w, int 
   return mask;
 }
 
-int TrtYoloX::getMultitaskNum(void)
-{
-  return multitask_;
-}
+int TrtYoloX::getMultitaskNum(void) { return multitask_; }
 
-cv::Mat TrtYoloX::getColorizedMask(int index, std::vector<Colormap> &colormap)
-{
+cv::Mat TrtYoloX::getColorizedMask(int index, std::vector<Colormap> &colormap) {
   cv::Mat mask;
   mask = segmentation_masks_[index];
   int width = mask.cols;
   int height = mask.rows;
-  cv::Mat cmask = cv::Mat::zeros(height, width, CV_8UC3);      
+  cv::Mat cmask = cv::Mat::zeros(height, width, CV_8UC3);
   for (int y = 0; y < height; y++) {
     for (int x = 0; x < width; x++) {
       unsigned char id = mask.at<unsigned char>(y, x);
       cmask.at<cv::Vec3b>(y, x)[0] = colormap[id].color[2];
       cmask.at<cv::Vec3b>(y, x)[1] = colormap[id].color[1];
-      cmask.at<cv::Vec3b>(y, x)[2] = colormap[id].color[0];      
+      cmask.at<cv::Vec3b>(y, x)[2] = colormap[id].color[0];
     }
   }
   return cmask;
 }
 
-cv::Mat TrtYoloX::getSpecifiedMask(int index, unsigned char specified)
-{
+cv::Mat TrtYoloX::getSpecifiedMask(int index, unsigned char specified) {
   cv::Mat mask;
   mask = segmentation_masks_[index];
   int width = mask.cols;
   int height = mask.rows;
-  cv::Mat ret = cv::Mat::zeros(height, width, CV_8UC1);      
+  cv::Mat ret = cv::Mat::zeros(height, width, CV_8UC1);
   for (int y = 0; y < height; y++) {
     for (int x = 0; x < width; x++) {
       unsigned char id = mask.at<unsigned char>(y, x);
       if (id == specified) {
-	ret.at<unsigned char>(y, x) = 255;
+        ret.at<unsigned char>(y, x) = 255;
       }
     }
   }

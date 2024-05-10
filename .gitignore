@@ -18,7 +18,6 @@ api/
 *.opendb
 *.exe
 .vs/
-.vscode/
 *.log
 *.pt
 .ipynb_checkpoints
