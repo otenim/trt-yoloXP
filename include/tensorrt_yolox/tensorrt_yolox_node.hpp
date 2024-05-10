@@ -18,10 +18,9 @@
 #include <image_transport/image_transport.hpp>
 #include <opencv2/opencv.hpp>
 #include <rclcpp/rclcpp.hpp>
-#include <tensorrt_yolox/tensorrt_yolox.hpp>
-
 #include <sensor_msgs/msg/image.hpp>
 #include <std_msgs/msg/header.hpp>
+#include <tensorrt_yolox/tensorrt_yolox.hpp>
 #include <tier4_perception_msgs/msg/detected_objects_with_feature.hpp>
 
 #if __has_include(<cv_bridge/cv_bridge.hpp>)
@@ -37,31 +36,30 @@
 #include <string>
 #include <vector>
 
-namespace tensorrt_yolox
-{
-using LabelMap = std::map<int, std::string>;
+namespace tensorrt_yolox {
+  using LabelMap = std::map<int, std::string>;
 
-class TrtYoloXNode : public rclcpp::Node
-{
-public:
-  explicit TrtYoloXNode(const rclcpp::NodeOptions & node_options);
+  class TrtYoloXNode : public rclcpp::Node {
+   public:
+    explicit TrtYoloXNode(const rclcpp::NodeOptions& node_options);
 
-private:
-  void onConnect();
-  void onImage(const sensor_msgs::msg::Image::ConstSharedPtr msg);
-  bool readLabelFile(const std::string & label_path);
-  void replaceLabelMap();
+   private:
+    void onConnect();
+    void onImage(const sensor_msgs::msg::Image::ConstSharedPtr msg);
+    bool readLabelFile(const std::string& label_path);
+    void replaceLabelMap();
 
-  image_transport::Publisher image_pub_;
-  rclcpp::Publisher<tier4_perception_msgs::msg::DetectedObjectsWithFeature>::SharedPtr objects_pub_;
+    image_transport::Publisher image_pub_;
+    rclcpp::Publisher<tier4_perception_msgs::msg::DetectedObjectsWithFeature>::
+        SharedPtr objects_pub_;
 
-  image_transport::Subscriber image_sub_;
+    image_transport::Subscriber image_sub_;
 
-  rclcpp::TimerBase::SharedPtr timer_;
+    rclcpp::TimerBase::SharedPtr timer_;
 
-  LabelMap label_map_;
-  std::unique_ptr<tensorrt_yolox::TrtYoloX> trt_yolox_;
-};
+    LabelMap label_map_;
+    std::unique_ptr<tensorrt_yolox::TrtYoloX> trt_yolox_;
+  };
 
 }  // namespace tensorrt_yolox
 
